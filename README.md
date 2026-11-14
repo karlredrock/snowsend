@@ -101,7 +101,7 @@ transfer the **ZIP**, not the bare folder or .app for proper transfer.
 ### Option C — You are already on the Snow Leopard Mac
 
 ```sh
-git clone https://github.com/karlredrock/snowsend.git
+git clone https://github.com/karlredrock/snowsend-osx.git
 cd snowsend
 chmod +x build_app.sh && ./build_app.sh
 ```
