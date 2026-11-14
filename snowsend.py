@@ -4,8 +4,9 @@
 SnowSend - Cliente LocalSend (Protocolo v2) para Mac OS X 10.6 Snow Leopard
 =================================================================================
 - Python 2.6 / 2.7 ( /usr/bin/python en Snow Leopard ) y Python 3 (para pruebas
-  en un Mac moderno). Solo libreria estandar: Tkinter, socket, struct, json,
-  threading, BaseHTTPServer, urllib2, hashlib, uuid, mimetypes, os, sys.
+  en un Mac moderno). AppKit/ PyObjC del sistema para la barra de menus; resto
+  de librerias estandar: socket, struct, json, threading, BaseHTTPServer, urllib2,
+  hashlib, uuid, mimetypes, os, sys.
 - HTTP plano (sin TLS) en el puerto 53317. Snow Leopard no soporta TLS 1.2/1.3
   moderno de forma fiable, por eso en el dispositivo moderno hay que desactivar
   Encryption (ver README.md).
@@ -17,11 +18,11 @@ SnowSend - Cliente LocalSend (Protocolo v2) para Mac OS X 10.6 Snow Leopard
 - Servidor: GET /info, POST /register, POST /prepare-upload, POST /upload,
   POST /cancel  (ruta base /api/localsend/v2/...)
 - Cliente: secuencia prepare-upload -> upload.
-- GUI Tkinter (Aqua/X11 en 10.6).
+- Aplicacion nativa de barra de menus con AppKit/PyObjC (sin ventana ni icono en el Dock).
 
 Uso:
-  python snowsend.py                  # GUI
-  python snowsend.py --headless       # sin GUI (servidor + descubrimiento)
+  python snowsend.py                  # barra de menus (Mac OS X)
+  python snowsend.py --headless       # solo servidor + descubrimiento
   python snowsend.py --headless --alias MiMac --port 53317 \
              --download-dir ~/Downloads
 
@@ -58,20 +59,19 @@ except ImportError:
     import queue as queue_module
 
 try:
-    import Tkinter as tk
-    import tkFileDialog as filedialog
-    import tkMessageBox as messagebox
-    HAS_TKINTER = True
+    import AppKit
+    from AppKit import (
+        NSApplication, NSMenu, NSMenuItem, NSOpenPanel, NSStatusBar,
+        NSStatusItem, NSVariableStatusItemLength, NSOnState, NSOffState,
+        NSOKButton,
+    )
+    from Foundation import NSObject, NSTimer
+    HAS_APPKIT = True
 except ImportError:
-    try:
-        import tkinter as tk
-        from tkinter import filedialog, messagebox
-        HAS_TKINTER = True
-    except ImportError:
-        HAS_TKINTER = False
-        tk = None
-        filedialog = None
-        messagebox = None
+    AppKit = None
+    NSObject = None
+    NSTimer = None
+    HAS_APPKIT = False
 
 try:
     from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
@@ -241,24 +241,22 @@ class AppState(object):
         self.devices_lock = threading.Lock()
         self.sessions = {}         # sessionId -> dict(sesion)
         self.sessions_lock = threading.Lock()
-        self.log_queue = queue_module.Queue()
-        self.device_queue = queue_module.Queue()
         self.stop_event = threading.Event()
         self.discovery_sock = None
-        self._last_device_count = -1
 
     def log(self, msg):
         try:
             ts = time.strftime("%H:%M:%S")
         except Exception:
             ts = ""
-        line = "[%s] %s" % (ts, msg)
+        try:
+            line = u"[%s] %s" % (ts, to_text(msg))
+            if sys.version_info[0] < 3:
+                line = line.encode("utf-8")
+        except Exception:
+            line = "[%s] %s" % (ts, msg)
         try:
             print(line)
-        except Exception:
-            pass
-        try:
-            self.log_queue.put(line)
         except Exception:
             pass
 
@@ -295,10 +293,6 @@ class AppState(object):
             self.log("Dispositivo detectado: %s (%s) %s://%s:%s" % (
                 alias, device.get("deviceModel") or device.get("deviceType") or "",
                 protocol, ip, port))
-        try:
-            self.device_queue.put(device)
-        except Exception:
-            pass
 
 
 def build_info(state):
@@ -1185,7 +1179,7 @@ def start_http_server(state, port):
 
 def sanitize_log(text, limit=200):
     """Evita volcar bytes binarios/control (p. ej. una alerta TLS del
-    iPhone) al registro de la GUI."""
+    iPhone) al registro de la aplicación."""
     try:
         text = to_text(text)
     except Exception:
@@ -1358,176 +1352,222 @@ def send_files_to_device(state, device, filepaths):
 
 
 # ---------------------------------------------------------------------------
-# Interfaz grafica Tkinter (compatible con Tk 8.5 de Snow Leopard)
+# Aplicacion nativa de barra de menus (AppKit / PyObjC del sistema)
 # ---------------------------------------------------------------------------
 
-if HAS_TKINTER:
-    class SnowSendGUI(object):
-        def __init__(self, state):
+if HAS_APPKIT:
+    class SnowSendMenuBarApp(NSObject):
+        """Controlador Cocoa: no crea ventanas ni widgets Tk."""
+
+        def configure(self, state, application):
             self.state = state
-            self.root = tk.Tk()
-            self.root.title("SnowSend - Snow Leopard")
-            self.root.geometry("680x560")
+            self.application = application
+            self.server = None
+            self.selected_fingerprint = None
+            self.status_bar = NSStatusBar.systemStatusBar()
+            self.status_item = self.status_bar.statusItemWithLength_(
+                NSVariableStatusItemLength)
+            self.status_item.setHighlightMode_(True)
+            self.status_item.setToolTip_(u"SnowSend - LocalSend para Snow Leopard")
+
+            self.menu = NSMenu.alloc().initWithTitle_(u"SnowSend")
+            self.menu.setDelegate_(self)
+            # Los elementos deshabilitados (p. ej. Enviar sin destino) deben
+            # conservar su estado y no reactivarse por validacion automatica.
+            self.menu.setAutoenablesItems_(False)
+            self.status_item.setMenu_(self.menu)
+
+            self._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                2.0, self, "updateStatus:", None, True)
+            self.updateStatus_(None)
+            self.rebuild_menu()
+
+        def _devices_snapshot(self):
+            with self.state.devices_lock:
+                devices = [dict(device) for device in self.state.devices.values()]
+            devices.sort(key=lambda device: (
+                to_text(device.get("alias") or u"").lower(),
+                to_text(device.get("ip") or u"")))
+            return devices
+
+        def _selected_device(self):
+            if not self.selected_fingerprint:
+                return None
+            with self.state.devices_lock:
+                device = self.state.devices.get(self.selected_fingerprint)
+                if device:
+                    return dict(device)
+            return None
+
+        def _add_item(self, title, action=None, enabled=True):
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                title, action, u"")
+            if action:
+                item.setTarget_(self)
+            item.setEnabled_(bool(enabled))
+            self.menu.addItem_(item)
+            return item
+
+        def rebuild_menu(self):
+            self.menu.removeAllItems()
+            self._add_item(
+                u"Servidor local: HTTP activo en :%d" % int(self.state.port),
+                enabled=False)
+            self._add_item(
+                u"Alias del equipo: %s" % to_text(self.state.alias),
+                enabled=False)
+            self.menu.addItem_(NSMenuItem.separatorItem())
+
+            devices = self._devices_snapshot()
+            self._add_item(
+                u"Dispositivos detectados (%d):" % len(devices),
+                enabled=False)
+            if not devices:
+                self._add_item(u"No se han detectado dispositivos", enabled=False)
+            else:
+                for device in devices:
+                    alias = to_text(device.get("alias") or u"Desconocido")
+                    ip = to_text(device.get("ip") or u"?")
+                    try:
+                        port = int(device.get("port") or PORT)
+                    except Exception:
+                        port = PORT
+                    item = self._add_item(
+                        u"%s  (%s:%d)" % (alias, ip, port), "selectDevice:")
+                    fingerprint = device.get("fingerprint") or u""
+                    item.setRepresentedObject_(to_text(fingerprint))
+                    item.setState_(NSOnState if
+                                   fingerprint == self.selected_fingerprint
+                                   else NSOffState)
+
+            selected = self._selected_device()
+            if devices and not selected:
+                self._add_item(
+                    u"Selecciona un dispositivo para habilitar el envio",
+                    enabled=False)
+            self.menu.addItem_(NSMenuItem.separatorItem())
+            self._add_item(u"Enviar archivo...", "sendFile:",
+                           enabled=(selected is not None))
+            self._add_item(u"Anunciar / Refrescar", "announce:")
+            self._add_item(u"Escanear red", "scanNetwork:")
+            self.menu.addItem_(NSMenuItem.separatorItem())
+            self._add_item(u"Salir", "quit:")
+
+        def menuWillOpen_(self, menu):
+            self.updateStatus_(None)
+            self.rebuild_menu()
+
+        def updateStatus_(self, timer):
+            if not self.status_item:
+                return
+            count = len(self._devices_snapshot())
+            self.status_item.setTitle_(u"SnowSend (%d)" % count)
             try:
-                self.root.minsize(560, 420)
+                self.status_item.setToolTip_(
+                    u"SnowSend - Servidor HTTP :%d - %d dispositivo(s)" %
+                    (int(self.state.port), count))
             except Exception:
                 pass
-            self.device_order = []
-            self.build_widgets()
-            self.poll_queues()
 
-        def build_widgets(self):
-            root = self.root
-            top = tk.Frame(root, padx=8, pady=6)
-            top.pack(fill=tk.X)
-            tk.Label(top, text="Alias:").pack(side=tk.LEFT)
-            self.alias_var = tk.StringVar()
-            self.alias_var.set(self.state.alias)
-            tk.Entry(top, textvariable=self.alias_var, width=22).pack(side=tk.LEFT, padx=(4, 8))
-            tk.Button(top, text="Aplicar", command=self.apply_alias).pack(side=tk.LEFT)
-            tk.Label(top, text="Servidor: HTTP :53317 - activo", fg="green").pack(side=tk.RIGHT)
-
-            dl_frame = tk.Frame(root, padx=8, pady=2)
-            dl_frame.pack(fill=tk.X)
-            tk.Label(dl_frame, text="Carpeta de descarga:").pack(side=tk.LEFT)
-            self.download_label = tk.Label(dl_frame, text=self.state.download_dir)
-            self.download_label.pack(side=tk.LEFT, padx=4)
-            tk.Button(dl_frame, text="Cambiar...", command=self.on_change_download).pack(side=tk.RIGHT)
-
-            tk.Label(root, text="Dispositivos detectados:", anchor=tk.W).pack(fill=tk.X, padx=8, pady=(6, 0))
-            list_frame = tk.Frame(root, padx=8, pady=2)
-            list_frame.pack(fill=tk.X)
-            self.listbox = tk.Listbox(list_frame, height=8, width=82)
-            scrollbar = tk.Scrollbar(list_frame, command=self.listbox.yview)
-            self.listbox.config(yscrollcommand=scrollbar.set)
-            self.listbox.pack(side=tk.LEFT, fill=tk.X, expand=tk.YES)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-            btn_frame = tk.Frame(root, padx=8, pady=4)
-            btn_frame.pack(fill=tk.X)
-            tk.Button(btn_frame, text="Anunciar / Refrescar", command=self.on_announce).pack(side=tk.LEFT, padx=2)
-            tk.Button(btn_frame, text="Escanear red", command=self.on_scan).pack(side=tk.LEFT, padx=2)
-            tk.Button(btn_frame, text="Enviar Archivo...", command=self.on_send).pack(side=tk.LEFT, padx=12)
-            tk.Button(btn_frame, text="Limpiar registro", command=self.on_clear_log).pack(side=tk.RIGHT, padx=2)
-
-            tk.Label(root, text="Registro:", anchor=tk.W).pack(fill=tk.X, padx=8, pady=(4, 0))
-            log_frame = tk.Frame(root, padx=8, pady=2)
-            log_frame.pack(fill=tk.BOTH, expand=tk.YES)
-            self.log_text = tk.Text(log_frame, height=14, width=82, wrap=tk.WORD)
-            log_scroll = tk.Scrollbar(log_frame, command=self.log_text.yview)
-            self.log_text.config(yscrollcommand=log_scroll.set)
-            self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=tk.YES)
-            log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-            self.log_text.config(state="disabled")
-
-            tk.Label(root, text="HTTP plano :53317 - En el movil/Mac moderno desactiva Encryption (cifrado) en LocalSend.",
-                     fg="gray").pack(fill=tk.X, padx=8, pady=4)
-
-        def apply_alias(self):
-            new_alias = self.alias_var.get().strip()
-            if new_alias:
-                self.state.alias = new_alias
-                self.state.log("Alias cambiado a: %s" % new_alias)
-                self.on_announce()
-
-        def on_announce(self):
-            self.state.log("Anunciando presencia en la red (multicast %s:%d)..." % (MULTICAST_IP, PORT))
-            t = threading.Thread(target=announce_once, args=(self.state,))
-            t.daemon = True
-            t.start()
-
-        def on_scan(self):
-            t = threading.Thread(target=scan_subnet, args=(self.state,))
-            t.daemon = True
-            t.start()
-
-        def on_clear_log(self):
-            self.log_text.config(state="normal")
-            self.log_text.delete("1.0", tk.END)
-            self.log_text.config(state="disabled")
-
-        def on_change_download(self):
-            folder = filedialog.askdirectory(title="Carpeta de descarga")
-            if folder:
-                self.state.download_dir = folder
-                self.download_label.config(text=folder)
-                self.state.log("Carpeta de descarga: %s" % folder)
-
-        def on_send(self):
-            sel = self.listbox.curselection()
-            if not sel:
-                messagebox.showwarning("SnowSend", "Selecciona primero un dispositivo de la lista.")
+        def selectDevice_(self, sender):
+            fingerprint = sender.representedObject()
+            if not fingerprint:
                 return
-            idx = int(sel[0])
-            if idx < 0 or idx >= len(self.device_order):
+            self.selected_fingerprint = to_text(fingerprint)
+            device = self._selected_device()
+            if device:
+                self.state.log(u"Dispositivo seleccionado para envio: %s (%s)" % (
+                    to_text(device.get("alias") or u"?"),
+                    to_text(device.get("ip") or u"?")))
+
+        def sendFile_(self, sender):
+            device = self._selected_device()
+            if not device:
+                self.state.log("Selecciona un dispositivo antes de enviar un archivo.")
                 return
-            fp = self.device_order[idx]
-            device_copy = None
-            with self.state.devices_lock:
-                dev = self.state.devices.get(fp)
-                if dev:
-                    device_copy = dict(dev)
-            if not device_copy:
+
+            panel = NSOpenPanel.openPanel()
+            panel.setTitle_(u"Seleccionar archivo para enviar")
+            panel.setCanChooseFiles_(True)
+            panel.setCanChooseDirectories_(False)
+            panel.setAllowsMultipleSelection_(False)
+            try:
+                panel.setPrompt_(u"Enviar")
+            except Exception:
+                pass
+            if panel.runModal() != NSOKButton:
                 return
-            filepaths = filedialog.askopenfilenames(
-                title="Seleccionar archivos para enviar a %s" % (device_copy.get("alias") or ""))
+
+            filepaths = []
+            try:
+                for url in panel.URLs():
+                    filepaths.append(to_text(url.path()))
+            except Exception:
+                try:
+                    filepaths = [to_text(name) for name in panel.filenames()]
+                except Exception:
+                    filepaths = []
             if not filepaths:
                 return
-            self.state.log("Envio iniciado a %s (%d archivo(s))" % (
-                device_copy.get("alias"), len(filepaths)))
-            t = threading.Thread(target=send_files_to_device,
-                                 args=(self.state, device_copy, list(filepaths)))
-            t.daemon = True
-            t.start()
 
-        def refresh_device_list(self):
-            self.listbox.delete(0, tk.END)
-            self.device_order = []
-            with self.state.devices_lock:
-                devices = list(self.state.devices.values())
-            devices.sort(key=lambda d: d.get("alias", ""))
-            for d in devices:
-                label = "%s  -  %s  (%s://%s:%s)" % (
-                    d.get("alias"),
-                    d.get("deviceModel") or d.get("deviceType") or "",
-                    d.get("protocol"), d.get("ip"), d.get("port"))
-                self.listbox.insert(tk.END, label)
-                self.device_order.append(d.get("fingerprint"))
-            if len(devices) != self.state._last_device_count:
-                self.state._last_device_count = len(devices)
-                if devices:
-                    self.state.log("Dispositivos en lista: %d" % len(devices))
+            self.state.log(u"Envio iniciado a %s (%s)" % (
+                to_text(device.get("alias") or u"?"),
+                to_text(os.path.basename(filepaths[0]))))
+            worker = threading.Thread(
+                target=send_files_to_device,
+                args=(self.state, device, filepaths))
+            worker.daemon = True
+            worker.start()
 
-        def poll_queues(self):
+        def announce_(self, sender):
+            self.state.log("Anunciando presencia en la red (multicast %s:%d)..." % (
+                MULTICAST_IP, PORT))
+            worker = threading.Thread(target=announce_once, args=(self.state,))
+            worker.daemon = True
+            worker.start()
+
+        def scanNetwork_(self, sender):
+            worker = threading.Thread(target=scan_subnet, args=(self.state,))
+            worker.daemon = True
+            worker.start()
+
+        def quit_(self, sender):
+            self.application.terminate_(sender)
+
+        def remove_status_item(self):
             try:
-                while True:
-                    line = self.state.log_queue.get_nowait()
-                    self.log_text.config(state="normal")
-                    self.log_text.insert(tk.END, line + "\n")
-                    self.log_text.see(tk.END)
-                    self.log_text.config(state="disabled")
-            except queue_module.Empty:
-                pass
-            need_refresh = False
-            try:
-                while True:
-                    self.state.device_queue.get_nowait()
-                    need_refresh = True
-            except queue_module.Empty:
-                pass
-            if need_refresh:
-                self.refresh_device_list()
-            try:
-                self.root.after(400, self.poll_queues)
+                if self.status_item:
+                    self.status_bar.removeStatusItem_(self.status_item)
+                    self.status_item = None
             except Exception:
                 pass
 else:
-    SnowSendGUI = None
+    SnowSendMenuBarApp = None
 
 
 # ---------------------------------------------------------------------------
 # Arranque
 # ---------------------------------------------------------------------------
+
+def stop_background_services(state, server):
+    """Detiene el receptor y cierra el socket de descubrimiento al salir."""
+    state.stop_event.set()
+    sock = getattr(state, "discovery_sock", None)
+    if sock is not None:
+        try:
+            sock.close()
+        except Exception:
+            pass
+    if server is not None:
+        try:
+            server.shutdown()
+        except Exception:
+            pass
+        try:
+            server.server_close()
+        except Exception:
+            pass
+
 
 def run_headless(state, port):
     state.port = port
@@ -1544,11 +1584,49 @@ def run_headless(state, port):
     except KeyboardInterrupt:
         state.log("Interrumpido por el usuario.")
     finally:
-        state.stop_event.set()
+        stop_background_services(state, server)
+
+
+def run_menu_bar(state, port):
+    """Arranca Cocoa en el hilo principal y la red en hilos de fondo."""
+    if not HAS_APPKIT:
+        print("AppKit/PyObjC no esta disponible; iniciando modo headless.")
+        run_headless(state, port)
+        return
+
+    state.port = port
+    application = NSApplication.sharedApplication()
+    server = None
+    controller = None
+    try:
+        # LSUIElement en Info.plist oculta el Dock; la politica accessory
+        # lo refuerza en versiones de AppKit que exponen esta API.
         try:
-            server.shutdown()
+            activation_policy = getattr(
+                AppKit, "NSApplicationActivationPolicyAccessory", 1)
+            application.setActivationPolicy_(activation_policy)
         except Exception:
             pass
+
+        controller = SnowSendMenuBarApp.alloc().init()
+        controller.configure(state, application)
+        application.setDelegate_(controller)
+
+        server = start_http_server(state, port)
+        controller.server = server
+        discovery_thread = threading.Thread(target=discovery_loop, args=(state,))
+        discovery_thread.daemon = True
+        discovery_thread.start()
+
+        state.log("SnowSend iniciado en la barra de menus - Alias: %s" % state.alias)
+        state.log("Descubrimiento multicast: %s:%d" % (MULTICAST_IP, PORT))
+        state.log("Carpeta de descarga: %s" % state.download_dir)
+        state.log("HTTP plano en :%d - desactiva Encryption en el dispositivo moderno." % port)
+        application.run()
+    finally:
+        stop_background_services(state, server)
+        if controller is not None:
+            controller.remove_status_item()
 
 
 def print_usage():
@@ -1584,40 +1662,10 @@ def main():
         i += 1
 
     state = AppState(alias, download_dir)
-
-    if headless or not HAS_TKINTER:
-        if not HAS_TKINTER and not headless:
-            print("Tkinter no disponible, usando modo headless.")
+    if headless:
         run_headless(state, port)
-        return
-
-    state.port = port
-    gui = SnowSendGUI(state)
-    server = start_http_server(state, port)
-    t = threading.Thread(target=discovery_loop, args=(state,))
-    t.daemon = True
-    t.start()
-    state.log("SnowSend iniciado - Alias: %s" % alias)
-    state.log("Descubrimiento multicast: %s:%d" % (MULTICAST_IP, PORT))
-    state.log("Carpeta de descarga: %s" % download_dir)
-    state.log("HTTP plano en :%d - En el dispositivo moderno desactiva Encryption." % port)
-
-    def on_close():
-        state.stop_event.set()
-        try:
-            server.shutdown()
-        except Exception:
-            pass
-        try:
-            gui.root.destroy()
-        except Exception:
-            pass
-
-    try:
-        gui.root.protocol("WM_DELETE_WINDOW", on_close)
-    except Exception:
-        pass
-    gui.root.mainloop()
+    else:
+        run_menu_bar(state, port)
 
 
 if __name__ == "__main__":

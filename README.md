@@ -1,8 +1,9 @@
 # SnowSend — LocalSend para Mac OS X 10.6 Snow Leopard
 
-Cliente del **protocolo LocalSend v2** escrito en Python 2.6/2.7 con la
-librería estándar de Snow Leopard, empaquetado como aplicación nativa
-**`SnowSend.app`** (doble clic, sin Terminal).
+Cliente del **protocolo LocalSend v2** escrito en Python 2.6/2.7, con
+interfaz Cocoa nativa a través del PyObjC incluido en Snow Leopard y el
+resto basado en la librería estándar. Se empaqueta como **`SnowSend.app`**
+(doble clic, sin Terminal).
 
 **SnowSend** es un proyecto independiente: implementa el protocolo
 LocalSend desde cero para que un Mac con Snow Leopard pueda intercambiar
@@ -14,7 +15,7 @@ No está afiliado, patrocinado ni respaldado por el proyecto LocalSend.
 │  Mac Snow Leopard (10.6)    │  ◄───────────────────────────►  │  Móvil / Mac moderno        │
 │  SnowSend.app               │     multicast UDP 224.0.0.167   │  App oficial LocalSend       │
 │  /usr/bin/python (2.6/2.7)  │     descubrimiento + archivos   │  Encryption: OFF             │
-│  Tkinter + BaseHTTPServer   │                                 │  (ver §3, imprescindible)    │
+│  AppKit + BaseHTTPServer    │                                 │  (ver §3, imprescindible)    │
 └─────────────────────────────┘                                 └──────────────────────────────┘
 ```
 
@@ -24,7 +25,7 @@ No está afiliado, patrocinado ni respaldado por el proyecto LocalSend.
 > habla **HTTP sin cifrar en el puerto 53317**. Úsalo solo en tu red
 > local de confianza.
 
-**Versión:** 1.3 (`2.0.3-10.6`) · **Licencia:** MIT (ver §10) ·
+**Versión:** 1.4 (`2.0.3-10.6`) · **Licencia:** MIT (ver §10) ·
 **Estado:** proyecto personal, asistido por IA (§9)
 
 > **In English (short version).** SnowSend is a small, dependency-free
@@ -57,7 +58,7 @@ desde los artefactos de **Actions → CI → SnowSend-app**.
 
 | Archivo | Para qué sirve |
 |---|---|
-| `snowsend.py` | Código fuente completo (GUI Tkinter + servidor HTTP + descubrimiento multicast + cliente de envío). Compatible Python 2.6/2.7 y Python 3. |
+| `snowsend.py` | Código fuente (barra de menús nativa AppKit/PyObjC + servidor HTTP + descubrimiento multicast + cliente de envío). Compatible con Python 2.6/2.7 y Python 3 (modo headless). |
 | `build_app.sh` | Script que genera `SnowSend.app` (Info.plist, launcher, icono). |
 | `SnowSend.app/` | **La aplicación lista para copiar al Snow Leopard** y abrir con doble clic. |
 | `SnowSend.zip` | El mismo `.app` comprimido en ZIP (recomendado para transferirlo, ver §2). |
@@ -69,7 +70,7 @@ Estructura del paquete (clásica de Mac OS X 10.6):
 ```
 SnowSend.app/
 └── Contents/
-    ├── Info.plist          CFBundleExecutable=launcher, LSMinimumSystemVersion=10.6
+    ├── Info.plist          LSUIElement=true (sin Dock), LSMinimumSystemVersion=10.6
     ├── PkgInfo             APPL????
     ├── MacOS/
     │   └── launcher        script /bin/sh ejecutable (chmod +x)
@@ -88,9 +89,10 @@ exec /usr/bin/python "$RESOURCES_DIR/snowsend.py"
 ```
 
 Sin dependencias externas: nada de `pip`, `requests`, `flask`,
-`PyInstaller` ni `py2app`. Solo `Tkinter`, `socket`, `struct`, `json`,
-`threading`, `BaseHTTPServer`, `urllib2`, `hashlib`, `uuid`,
-`mimetypes`, `os` y `sys`, todo incluido en Snow Leopard.
+`PyInstaller` ni `py2app`. La interfaz usa únicamente **AppKit y Foundation
+(PyObjC incluido por Apple en Snow Leopard)**; la red usa módulos de la
+librería estándar de Python (`socket`, `struct`, `json`, `threading`,
+`BaseHTTPServer`, `urllib2`, `hashlib`, `uuid`, `mimetypes`, `os`, `sys`).
 
 ---
 
@@ -112,7 +114,7 @@ ejecución del `launcher`. La forma más segura es llevarla **en ZIP**.
 3. En el Snow Leopard, abre el USB, haz doble clic en `SnowSend.zip`:
    **Utilidad de Archivos** (incluida en 10.6) lo descomprime solo.
 4. Arrastra `SnowSend.app` a **Aplicaciones** (`/Applications`).
-5. Doble clic en `SnowSend.app`. Aparece la ventana de SnowSend.
+5. Doble clic en `SnowSend.app`. Aparece **SnowSend** en la barra de menús; no abre ventana ni muestra icono en el Dock.
 
 > Si tras copiarla el doble clic no hace nada (p. ej. la copiaste
 > desde Windows y se perdió el permiso `+x`), abre Terminal en el
@@ -184,15 +186,19 @@ el **mismo Wi-Fi / misma red local**, sin aislamiento de clientes
 
 ## 4. Uso diario
 
-### Al abrir la app
+### Barra de menús
 
-- Ventana **“SnowSend - Snow Leopard”** con:
-  - **Alias** (nombre de este Mac, editable; por defecto el nombre
-    del equipo). Pulsa *Aplicar* para re-anunciar con el nuevo nombre.
-  - **Carpeta de descarga** (por defecto `~/Downloads`). Botón
-    *Cambiar…* para elegir otra.
-  - **Lista de dispositivos detectados** en tiempo real.
-  - **Registro** con todo lo que pasa (envíos, recepciones, errores).
+Al abrir SnowSend aparece el texto **“SnowSend (n)”** en la barra superior,
+donde `n` es el número de dispositivos detectados; la app no crea una
+ventana y no aparece en el Dock. Haz clic en el título para ver el estado
+del servidor HTTP, el alias del equipo y la lista de dispositivos.
+
+- Haz clic en un dispositivo para seleccionarlo (queda marcado).
+- Pulsa **Enviar archivo...** y elige un archivo en el panel nativo de Cocoa.
+- **Anunciar / Refrescar** vuelve a publicar el equipo por multicast;
+  **Escanear red** es un respaldo para routers que bloquean multicast.
+- El alias se toma del nombre del equipo. Los mensajes y errores se guardan
+  en `~/Library/Logs/SnowSend.log`.
 
 ### Recibir archivos
 
@@ -206,21 +212,25 @@ Si ya existe un archivo con el mismo nombre, se guarda como
 
 ### Enviar archivos
 
-1. Espera a que el dispositivo destino aparezca en la lista
+1. Espera a que el dispositivo destino aparezca en el menú
    (o pulsa **Anunciar / Refrescar**; si tu router bloquea el
    multicast, pulsa **Escanear red**, que pregunta por HTTP a cada
    IP del `/24` local).
-2. Selecciona el dispositivo en la lista.
-3. Pulsa **Enviar Archivo…** y elige uno o varios archivos.
+2. Haz clic en el nombre del dispositivo para seleccionarlo.
+3. Abre de nuevo el menú, pulsa **Enviar archivo...** y elige un archivo
+   en el panel de selección nativo de Cocoa (`NSOpenPanel`). La transferencia
+   corre en segundo plano para no bloquear la barra de menús.
 4. El cliente hace la secuencia del protocolo v2:
    `POST /prepare-upload` (metadatos + SHA-256) → el receptor
    devuelve `sessionId` + token por archivo → `POST /upload`
-   con el contenido binario de cada archivo.
-5. El progreso y la confirmación aparecen en el **Registro**.
+   con el contenido binario del archivo.
+5. El progreso y la confirmación quedan en el registro de
+   `~/Library/Logs/SnowSend.log`.
 
 ### Cerrar
 
-Cierra la ventana. Si algo falla al arrancar, mira el registro:
+Elige **Salir** en el menú de SnowSend para detener limpiamente el servidor
+y el receptor multicast. Si algo falla al arrancar, mira el registro:
 
 ```
 ~/Library/Logs/SnowSend.log
@@ -293,8 +303,8 @@ python3 -m py_compile snowsend.py   # en un Mac moderno
 /usr/bin/python -m py_compile snowsend.py   # en Snow Leopard
 ```
 
-Modo sin GUI (útil para pruebas o para dejarlo corriendo en un
-Mac viejo sin pantalla):
+Modo headless (sin barra de menús; útil para pruebas o para dejarlo
+corriendo en un Mac viejo sin pantalla):
 
 ```sh
 python snowsend.py --headless --alias MiMac --port 53317 --download-dir ~/Downloads
@@ -311,9 +321,9 @@ chmod +x build_app.sh
 ```
 
 Antes de publicar una versión, comprueba que el paquete quedó completo:
-`Info.plist` con `CFBundleName=SnowSend`, `Contents/MacOS/launcher`
-ejecutable y `Contents/Resources/` con `snowsend.py`, `LICENSE.txt` y
-`AppIcon.icns`.
+`Info.plist` con `CFBundleName=SnowSend` y `LSUIElement=true`,
+`Contents/MacOS/launcher` ejecutable y `Contents/Resources/` con
+`snowsend.py`, `LICENSE.txt` y `AppIcon.icns`.
 
 Pruebas automáticas incluidas en `tests/` (se ejecutan con Python 3 en
 cualquier máquina; no hacen falta el Mac ni el móvil):
@@ -465,10 +475,11 @@ Sin estos proyectos, SnowSend no existiría. Gracias a:
   (theanazerka, licencia GPL-3.0) — cliente de LocalSend para iOS
   antiguo, útil para entender cómo se comporta el lado iOS. Solo se
   tomaron ideas de comportamiento; **no se copió código**.
-- **Proyecto Python** y sus bibliotecas estándar (`Tkinter`,
-  `BaseHTTPServer`, `httplib`, `socket`, `json`, `hashlib`, `threading`),
-  mantenidas por la Python Software Foundation y la comunidad.
-- **Tcl/Tk** — el toolkit detrás de la interfaz, incluido en Mac OS X.
+- **Proyecto Python** y sus bibliotecas estándar (`BaseHTTPServer`,
+  `httplib`, `socket`, `json`, `hashlib`, `threading`), mantenidas por la
+  Python Software Foundation y la comunidad.
+- **Apple / PyObjC** — `AppKit`, `Foundation`, `NSStatusBar` y `NSOpenPanel`
+  para una interfaz Cocoa nativa sin dependencias instalables.
 - **Apple** — por Mac OS X 10.6 Snow Leopard y su intérprete de Python
   preinstalado, que hacen posible que este Mac siga siendo útil.
 - Al **autor del proyecto**, por probar en hardware real, reportar los
@@ -487,6 +498,17 @@ LocalSend, Apple Inc. ni con los autores de los proyectos citados.
 ---
 
 ## 12. Historial de cambios
+
+### v1.4 (2.0.3-10.6) — Interfaz nativa de barra de menús
+
+1. Se reemplaza la ventana Tkinter por un elemento `NSStatusItem` de AppKit;
+   el menú muestra estado del servidor, alias y dispositivos detectados.
+2. Se selecciona un dispositivo en el menú y **Enviar archivo...** abre un
+   `NSOpenPanel` Cocoa nativo. El envío continúa en un hilo de fondo.
+3. El paquete configura `LSUIElement=true` para ocultar el Dock y el botón
+   **Salir** detiene el servidor HTTP y el receptor multicast limpiamente.
+4. No se añaden dependencias: la interfaz usa el PyObjC incluido en
+   Snow Leopard y el transporte sigue usando la biblioteca estándar.
 
 ### v1.3 (2.0.3-10.6) — Renombrado a SnowSend, licencia y créditos
 
