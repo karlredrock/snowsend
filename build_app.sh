@@ -58,9 +58,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLISTEOF'
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>1.3</string>
+	<string>1.7</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.0.3-10.6</string>
+	<string>2.0.7-10.6</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>10.6</string>
 	<key>NSPrincipalClass</key>
