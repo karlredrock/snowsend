@@ -14,7 +14,7 @@ No está afiliado, patrocinado ni respaldado por el proyecto LocalSend.
 ┌─────────────────────────────┐        HTTP plano :53317        ┌──────────────────────────────┐
 │  Mac Snow Leopard (10.6)    │  ◄───────────────────────────►  │  Móvil / Mac moderno        │
 │  SnowSend.app               │     multicast UDP 224.0.0.167   │  App oficial LocalSend       │
-│  /usr/bin/python (2.6/2.7)  │     descubrimiento + archivos   │  Encryption: OFF             │
+│  /usr/bin/pythonw (2.6/2.7) │     descubrimiento + archivos   │  Encryption: OFF             │
 │  AppKit + BaseHTTPServer    │                                 │  (ver §3, imprescindible)    │
 └─────────────────────────────┘                                 └──────────────────────────────┘
 ```
@@ -25,7 +25,7 @@ No está afiliado, patrocinado ni respaldado por el proyecto LocalSend.
 > habla **HTTP sin cifrar en el puerto 53317**. Úsalo solo en tu red
 > local de confianza.
 
-**Versión:** 1.4 (`2.0.3-10.6`) · **Licencia:** MIT (ver §10) ·
+**Versión:** 1.4.1 (`2.0.3-10.6`) · **Licencia:** MIT (ver §10) ·
 **Estado:** proyecto personal, asistido por IA (§9)
 
 > **In English (short version).** SnowSend is a small, dependency-free
@@ -48,9 +48,9 @@ cd snowsend
 chmod +x build_app.sh && ./build_app.sh   # crea SnowSend.app
 ```
 
-Después copia `SnowSend.app` (o `SnowSend.zip`) al Mac con Snow Leopard.
-Si no quieres compilar, descarga el ZIP desde la pestaña **Releases** o
-desde los artefactos de **Actions → CI → SnowSend-app**.
+Después copia `SnowSend.app` (o su ZIP) al Mac con Snow Leopard.
+Si el release no incluye `SnowSend.zip`, descarga el ZIP de código fuente
+y ejecuta `sh build_app.sh` para generar el paquete en el Mac.
 
 ---
 
@@ -82,10 +82,17 @@ SnowSend.app/
 
 El `launcher` resuelve su propia ruta con `dirname "$0"`, redirige
 `stdout`/`stderr` a `~/Library/Logs/SnowSend.log` (para que al
-hacer doble clic **no** se abra una ventana de Terminal) y ejecuta:
+hacer doble clic **no** se abra una ventana de Terminal) y prefiere
+`/usr/bin/pythonw`, el intérprete GUI de Snow Leopard para Cocoa. Solo
+usa `/usr/bin/python` como alternativa si `pythonw` no está disponible:
 
 ```sh
-exec /usr/bin/python "$RESOURCES_DIR/snowsend.py"
+if [ -x /usr/bin/pythonw ]; then
+  PYTHON_BIN=/usr/bin/pythonw
+else
+  PYTHON_BIN=/usr/bin/python
+fi
+exec "$PYTHON_BIN" -u "$RESOURCES_DIR/snowsend.py"
 ```
 
 Sin dependencias externas: nada de `pip`, `requests`, `flask`,
@@ -498,6 +505,13 @@ LocalSend, Apple Inc. ni con los autores de los proyectos citados.
 ---
 
 ## 12. Historial de cambios
+
+### v1.4.1 — Corrección del arranque Cocoa
+
+- El launcher usa primero `/usr/bin/pythonw`, requerido por algunas
+  aplicaciones GUI de Cocoa en Snow Leopard, y activa el logging sin búfer.
+- Si AppKit/PyObjC no está disponible, el arranque normal informa el error
+  en el registro en vez de quedarse ejecutando en modo headless sin interfaz.
 
 ### v1.4 (2.0.3-10.6) — Interfaz nativa de barra de menús
 

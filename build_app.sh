@@ -1,7 +1,7 @@
 #!/bin/sh
 # build_app.sh - Empaqueta SnowSend.app para Mac OS X 10.6 Snow Leopard
 # Uso:  ./build_app.sh
-# Requisitos en el Mac: /bin/sh, /usr/bin/python (2.6/2.7), sips/iconutil (opcionales)
+# Requisitos en el Mac: /bin/sh, /usr/bin/pythonw (2.6/2.7; python fallback), sips/iconutil (opcionales)
 # En Linux (sandbox) el paquete tambien se genera; sips/iconutil se omiten
 # y se crea un icono placeholder en Python puro, para que el build nunca falle.
 set -e
@@ -58,7 +58,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLISTEOF'
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>1.4</string>
+	<string>1.4.1</string>
 	<key>CFBundleShortVersionString</key>
 	<string>2.0.3-10.6</string>
 	<key>LSMinimumSystemVersion</key>
@@ -79,15 +79,28 @@ printf 'APPL????' > "$CONTENTS_DIR/PkgInfo"
 # --- launcher ---------------------------------------------------------------
 # Resuelve su propia ruta con dirname "$0", redirige stdout/stderr a
 # ~/Library/Logs/SnowSend.log (sin abrir Terminal al hacer doble clic)
-# y lanza /usr/bin/python con el script de Resources.
+# y prefiere pythonw, el interprete GUI de Snow Leopard para las APIs Cocoa.
 cat > "$MACOS_DIR/launcher" <<'LAUNCHEREOF'
 #!/bin/sh
 # SnowSend - launcher
 # Resuelve la ruta de este script (Contents/MacOS) de forma relativa.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESOURCES_DIR="$SCRIPT_DIR/../Resources"
-mkdir -p "$HOME/Library/Logs"
-exec /usr/bin/python "$RESOURCES_DIR/snowsend.py" >>"$HOME/Library/Logs/SnowSend.log" 2>&1
+LOG_DIR="$HOME/Library/Logs"
+LOG_FILE="$LOG_DIR/SnowSend.log"
+mkdir -p "$LOG_DIR"
+
+if [ -x /usr/bin/pythonw ]; then
+    PYTHON_BIN="/usr/bin/pythonw"
+elif [ -x /usr/bin/python ]; then
+    PYTHON_BIN="/usr/bin/python"
+else
+    echo "No se encontro /usr/bin/pythonw ni /usr/bin/python." >>"$LOG_FILE"
+    exit 127
+fi
+
+echo "==> SnowSend: iniciando con $PYTHON_BIN" >>"$LOG_FILE"
+exec "$PYTHON_BIN" -u "$RESOURCES_DIR/snowsend.py" >>"$LOG_FILE" 2>&1
 LAUNCHEREOF
 chmod +x "$MACOS_DIR/launcher"
 

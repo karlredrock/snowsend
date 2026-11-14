@@ -21,7 +21,7 @@ SnowSend - Cliente LocalSend (Protocolo v2) para Mac OS X 10.6 Snow Leopard
 - Aplicacion nativa de barra de menus con AppKit/PyObjC (sin ventana ni icono en el Dock).
 
 Uso:
-  python snowsend.py                  # barra de menus (Mac OS X)
+  pythonw snowsend.py                 # barra de menus (Mac OS X 10.6)
   python snowsend.py --headless       # solo servidor + descubrimiento
   python snowsend.py --headless --alias MiMac --port 53317 \
              --download-dir ~/Downloads
@@ -58,19 +58,20 @@ try:
 except ImportError:
     import queue as queue_module
 
+APPKIT_IMPORT_ERROR = None
 try:
     import AppKit
     from AppKit import (
         NSApplication, NSMenu, NSMenuItem, NSOpenPanel, NSStatusBar,
-        NSStatusItem, NSVariableStatusItemLength, NSOnState, NSOffState,
-        NSOKButton,
+        NSVariableStatusItemLength, NSOnState, NSOffState, NSOKButton,
     )
     from Foundation import NSObject, NSTimer
     HAS_APPKIT = True
-except ImportError:
+except ImportError as error:
     AppKit = None
     NSObject = None
     NSTimer = None
+    APPKIT_IMPORT_ERROR = error
     HAS_APPKIT = False
 
 try:
@@ -1590,9 +1591,7 @@ def run_headless(state, port):
 def run_menu_bar(state, port):
     """Arranca Cocoa en el hilo principal y la red en hilos de fondo."""
     if not HAS_APPKIT:
-        print("AppKit/PyObjC no esta disponible; iniciando modo headless.")
-        run_headless(state, port)
-        return
+        raise RuntimeError("AppKit/PyObjC no disponible: %s" % APPKIT_IMPORT_ERROR)
 
     state.port = port
     application = NSApplication.sharedApplication()
@@ -1658,15 +1657,20 @@ def main():
             i += 1
         elif a == "--help" or a == "-h":
             print_usage()
-            return
+            return 0
         i += 1
 
     state = AppState(alias, download_dir)
     if headless:
         run_headless(state, port)
-    else:
-        run_menu_bar(state, port)
+        return 0
+    if not HAS_APPKIT:
+        print("ERROR: AppKit/PyObjC no esta disponible: %s" % APPKIT_IMPORT_ERROR)
+        print("Usa --headless solo si quieres ejecutar el servidor sin interfaz.")
+        return 1
+    run_menu_bar(state, port)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
