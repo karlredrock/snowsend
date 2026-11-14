@@ -4,6 +4,8 @@ A **LocalSend protocol v2** client written in Python 2.6/2.7 using only the
 Snow Leopard system standard library, packaged as a native, double-clickable
 **`SnowSend.app`**.
 
+**IMPORTANT NOTE: This project used AI assisted coding as I personally couldn't manage to get the protocol working, however keep in mind I reviewed and tested it severely on my computers, as always I strongly suggest you only use this for personal usage in a secure network, if you have any improvements or suggestions I'll gladly review them, if you have any issues with AI projects I suggest you check another thing, however if you just care for something that just works, check it out**
+
 **SnowSend** is an independent project: it implements the LocalSend protocol
 from scratch so a Mac running Snow Leopard can exchange files with modern
 phones and computers that run the official app. It is not affiliated with,
@@ -37,9 +39,6 @@ sponsored by or endorsed by the LocalSend project.
 |---|---|
 | `snowsend.py` | Complete source (Tkinter GUI + HTTP server + multicast discovery + send client + 5-language UI). Works on Python 2.6/2.7 and Python 3. |
 | `build_app.sh` | Builds `SnowSend.app` (Info.plist, launcher, icon). |
-| `SnowSend.app/` | **The app ready to copy to your Snow Leopard Mac** and double-click. |
-| `SnowSend.zip` | The same `.app` compressed (recommended for transfer, see §2). |
-| `tests/` | Automated test suite (runs on any machine with Python 3). |
 | `LICENSE` | MIT license. Also copied inside the bundle as `Contents/Resources/LICENSE.txt`. |
 | `README.es.md` | Spanish version of this document. |
 
@@ -77,7 +76,7 @@ No external dependencies: no `pip`, no `requests`, no `flask`, no
 
 `SnowSend.app` is really a **folder** (a Finder bundle). Some copy methods
 flatten it or drop the executable bit on the `launcher`. The safe way is to
-carry it as a **ZIP**.
+carry it as a **ZIP**. Which you can find on the Releases Page.
 
 ### Option A — ZIP on a USB drive (recommended)
 
@@ -97,12 +96,12 @@ carry it as a **ZIP**.
 
 The other machine can serve the ZIP (macOS File Sharing, `python -m
 SimpleHTTPServer` in the folder, AirDrop from an older Mac, etc.). Always
-transfer the **ZIP**, not the bare folder.
+transfer the **ZIP**, not the bare folder or .app for proper transfer.
 
 ### Option C — You are already on the Snow Leopard Mac
 
 ```sh
-git clone https://github.com/YOUR_USER/snowsend.git
+git clone https://github.com/karlredrock/snowsend.git
 cd snowsend
 chmod +x build_app.sh && ./build_app.sh
 ```
@@ -112,10 +111,10 @@ right-click → **Open** once.
 
 ---
 
-## 3. ⚠️ Required on the phone / modern computer: turn encryption off
+## 3. ⚠️ Required on the phone / modern computer or device: turn encryption off
 
 The official LocalSend app encrypts by default (HTTPS with TLS 1.2+ and a
-self-signed certificate). **Snow Leopard cannot do that**, so the other device
+self-signed certificate). **Snow Leopard cannot do that** (or at least for proper function and stability on V1.x we don't support encryption, however we plan on implement it later), so the other device
 must talk plain HTTP:
 
 ### On the phone (Android / iPhone)
@@ -171,9 +170,9 @@ exactly that (`>>> The device does NOT accept plain HTTP on port 53317`).
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Everything lives inside the window — there is **no menu bar**:
+Everything lives inside the window — there is **no menu bar** as it's a Python App:
 
-- **Language buttons** at the bottom switch the interface instantly (see §5).
+- **Language buttons** at the bottom, switch the interface language instantly.
 - **Double-click a device** in the table to send files to it.
 - The Mac's name and the download folder are edited right in the window and
   saved to `~/.snowsend_config.json` when you press *Apply* or pick a folder.
@@ -214,7 +213,7 @@ Notes:
   middle of a large file, and huge files are not loaded into memory.
 - The queue lives only while the app is open; it is not saved to disk.
 
-### Small screens (11" MacBook Air, 1366 × 768)
+### Small screens (11" MacBook Air, 1366 × 768, or lower)
 
 The window **sizes itself to your screen** instead of assuming a big display.
 On start-up SnowSend measures the screen, and if the natural size does not fit
